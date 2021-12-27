@@ -31,7 +31,37 @@ off_t get_file_size(int fd) {
 /*
  * Move self to a leaf node of the cgroup.
  */
-int leaf_self() {}
+int leaf_self() {
+  int cgroup_fd = open("/proc/self/cgroup", O_RDONLY);
+  if (cgroup_fd == -1) {
+    perror("open");
+    return -1;
+  }
+
+  if (lseek(cgroup_fd, 3, SEEK_SET) == -1) {
+    perror("lseek");
+    return -1;
+  }
+
+  char cgroup_root_dir[1024] = "/sys/fs/cgroup";
+
+  off_t len;
+  if ((len = read(cgroup_fd, cgroup_root_dir + 14, 1010)) == -1) {
+    perror("read");
+    return -1;
+  }
+  cgroup_root_dir[len + 17] = 0x00;
+
+  fprintf(stderr, "%s\n", cgroup_root_dir);
+
+  int cgroup_dd = open(cgroup_root_dir, O_DIRECTORY);
+  if (cgroup_dd == -1) {
+    perror("open");
+    return -1;
+  }
+
+  return 0;
+}
 
 /*
  * Perform the copy between the two file descriptors.
@@ -112,6 +142,8 @@ int main(int argc, char **argv) {
   }
 
   // setup a cgroup for the child
+  if (leaf_self() == -1)
+    return -1;
 
   // wait for the child to pause and restart it
   int status;
