@@ -7,6 +7,7 @@
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -16,33 +17,28 @@
 
 #include <linux/wait.h>
 
-#define CHILD_STACK_SIZE (8 * 1024 * 1024)
-
-#define FILE_DEFAULT_NS ("/tmp/file_exists_0148c163-5919-4651")
-#define FILE_NEW_NS ("/tmp/file_exists_fd0fd491-9816-442d")
-
-void createFile(const char *fname) {
-  int fd = open(fname, O_RDONLY | O_CREAT, 0644);
-  TEST_ASSERT_GREATER_THAN_MESSAGE(0, fd, "open failed");
-  TEST_ASSERT_EQUAL_MESSAGE(0, close(fd), "close failed");
-}
-
-void deleteFileIfExists(const char *fname) {
-  if (access(fname, F_OK) == 0) {
-    TEST_ASSERT_EQUAL_MESSAGE(0, unlink(fname), "unlink failed");
+void setUp(void) {
+  static char *initialDir = NULL;
+  if (initialDir == NULL) {
+    initialDir = get_current_dir_name();
   }
+
+  TEST_ASSERT_NOT_EQUAL_MESSAGE(NULL, initialDir,
+                                "get working directory failed");
+  TEST_ASSERT_EQUAL_MESSAGE(0, chdir(initialDir),
+                            "returning to working directory failed");
 }
 
-void setUp(void) { createFile(FILE_DEFAULT_NS); }
-
-void tearDown(void) { deleteFileIfExists(FILE_DEFAULT_NS); }
+void tearDown(void) {}
 
 long clone3(struct clone_args *cl_args) {
   return syscall(SYS_clone3, cl_args, sizeof(struct clone_args));
 }
 
-void test_cloneFs_findsFileWhenFsCloned_succeeds(void) {
+void test_cloneFs_chdir_propagates(void) {
   // PREPARE
+  char tmpDir[] = "/tmp/tmpdir-XXXXXX";
+  TEST_ASSERT_NOT_EQUAL_MESSAGE(NULL, mkdtemp(tmpDir), "tmpdir failed");
 
   // ACT
   pid_t forkedChildPid;
@@ -57,7 +53,7 @@ void test_cloneFs_findsFileWhenFsCloned_succeeds(void) {
         .pidfd = (uint64_t)(&clonedChildPidFd),
         .child_tid = 0,
         .parent_tid = 0,
-        .exit_signal = 0,
+        .exit_signal = SIGCHLD,
         .stack = 0,
         .stack_size = 0,
         .tls = 0,
@@ -68,26 +64,100 @@ void test_cloneFs_findsFileWhenFsCloned_succeeds(void) {
 
     long cloneResult = clone3(&cl_args);
     if (cloneResult == 0) {
-      printf("child\n");
-      sleep(30);
+      if (chdir(tmpDir) != 0) {
+        exit(1);
+      }
 
       exit(0);
     } else if (cloneResult == -1) {
-      exit(1); // clone failed
+      exit(2); // clone failed
     }
 
-    sleep(30);
     siginfo_t status;
-    printf("clonedChildPidFd: %d\n", clonedChildPidFd);
     if (waitid(P_PIDFD, clonedChildPidFd, &status, WEXITED) == -1) {
-      perror("waitid");
-      exit(2); // wait failed
+      exit(3); // wait failed
     }
 
-    // MUST exit this process and not return
-    // else the test runner will be duplicated
+    if (status.si_status != 0) {
+      exit(status.si_status); // return status
+    }
 
-    exit(status.si_status); // propogate return status
+    char *cwd = get_current_dir_name();
+    int directory_moved = strcmp(cwd, tmpDir);
+    free(cwd);
+
+    if (directory_moved != 0) {
+      exit(4); // chdir did not propagate
+    }
+
+    exit(0);
+  }
+
+  // ASSERT
+  TEST_ASSERT_GREATER_THAN_MESSAGE(0, forkedChildPid, "fork failed");
+
+  int status = 0;
+  TEST_ASSERT_EQUAL_MESSAGE(forkedChildPid, waitpid(forkedChildPid, &status, 0),
+                            "wait failed");
+  TEST_ASSERT_EQUAL_MESSAGE(0, WEXITSTATUS(status), "return status non-zero");
+}
+
+void test_cloneNoFs_chdir_doesNotPropagate(void) {
+  // PREPARE
+  char tmpDir[] = "/tmp/tmpdir-XXXXXX";
+  TEST_ASSERT_NOT_EQUAL_MESSAGE(NULL, mkdtemp(tmpDir), "tmpdir failed");
+
+  // ACT
+  pid_t forkedChildPid;
+
+  if ((forkedChildPid = fork()) == 0) {
+    // child process - act but do not assert
+    // all assertions will be on the return code
+    int clonedChildPidFd;
+
+    struct clone_args cl_args = {
+        .flags = CLONE_PIDFD,
+        .pidfd = (uint64_t)(&clonedChildPidFd),
+        .child_tid = 0,
+        .parent_tid = 0,
+        .exit_signal = SIGCHLD,
+        .stack = 0,
+        .stack_size = 0,
+        .tls = 0,
+        .set_tid = 0,
+        .set_tid_size = 0,
+        .cgroup = 0,
+    };
+
+    long cloneResult = clone3(&cl_args);
+    if (cloneResult == 0) {
+      if (chdir(tmpDir) != 0) {
+        exit(1);
+      }
+
+      exit(0);
+    } else if (cloneResult == -1) {
+      exit(2); // clone failed
+    }
+
+    siginfo_t status;
+    if (waitid(P_PIDFD, clonedChildPidFd, &status, WEXITED) == -1) {
+      exit(3); // wait failed
+    }
+
+    if (status.si_status != 0) {
+      exit(status.si_status); // return status
+    }
+
+    char *cwd = get_current_dir_name();
+    int directory_moved = strcmp(cwd, tmpDir);
+    free(cwd);
+
+    if (directory_moved == 0) {
+      exit(4); // chdir did propagate
+    }
+
+    exit(0);
   }
 
   // ASSERT

@@ -1,6 +1,6 @@
 #include "unity.h"
 
-void setUp(void) {}
-void tearDown(void) {}
+void setUp() {}
+void tearDown() {}
 
-void test_alwaysSucceeds_succeeds(void) { TEST_ASSERT_EQUAL(1, 1); }
+void test_alwaysSucceeds_succeeds() { TEST_ASSERT_EQUAL(1, 1); }

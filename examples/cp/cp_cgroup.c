@@ -95,10 +95,10 @@ int main(int argc, char **argv) {
   }
 
   // all necessary files opened, drop filesystem
-  // if (unshare(CLONE_FS) == -1) {
-  //   perror("unshare");
-  //   return -1;
-  // }
+  if (unshare(CLONE_FS) == -1) {
+    perror("unshare");
+    return -1;
+  }
 
   // fork and copy in a second process
   pid_t child_pid = fork();
