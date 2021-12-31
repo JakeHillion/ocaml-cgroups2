@@ -35,7 +35,7 @@ long clone3(struct clone_args *cl_args) {
   return syscall(SYS_clone3, cl_args, sizeof(struct clone_args));
 }
 
-void test_cloneFs_chdir_propagates(void) {
+void test_cloneFs_chdir_doesPropagate(void) {
   // PREPARE
   char tmpDir[] = "/tmp/tmpdir-XXXXXX";
   TEST_ASSERT_NOT_EQUAL_MESSAGE(NULL, mkdtemp(tmpDir), "tmpdir failed");
@@ -65,7 +65,7 @@ void test_cloneFs_chdir_propagates(void) {
     long cloneResult = clone3(&cl_args);
     if (cloneResult == 0) {
       if (chdir(tmpDir) != 0) {
-        exit(1);
+        exit(1); // chdir failed
       }
 
       exit(0);
@@ -132,7 +132,7 @@ void test_cloneNoFs_chdir_doesNotPropagate(void) {
     long cloneResult = clone3(&cl_args);
     if (cloneResult == 0) {
       if (chdir(tmpDir) != 0) {
-        exit(1);
+        exit(1); // chdir failed
       }
 
       exit(0);
