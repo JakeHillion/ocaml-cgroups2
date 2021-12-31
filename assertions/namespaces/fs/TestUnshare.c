@@ -17,19 +17,38 @@
 
 #include <linux/wait.h>
 
-void setUp(void) {
-  static char *initialDir = NULL;
-  if (initialDir == NULL) {
-    initialDir = get_current_dir_name();
-  }
+static char *INITIAL_DIR = NULL;
+static char *TMP_DIR = NULL;
 
-  TEST_ASSERT_NOT_EQUAL_MESSAGE(NULL, initialDir,
-                                "get working directory failed");
-  TEST_ASSERT_EQUAL_MESSAGE(0, chdir(initialDir),
-                            "returning to working directory failed");
+void removeDirectory(char *dir) {
+  char cmd[256];
+  sprintf(cmd, "rm -r %s", dir);
+  TEST_ASSERT_EQUAL(0, system(cmd));
 }
 
-void tearDown(void) {}
+void setUp(void) {
+  INITIAL_DIR = get_current_dir_name();
+  TEST_ASSERT_NOT_EQUAL_MESSAGE(NULL, INITIAL_DIR,
+                                "get working directory failed");
+
+  const char tmp_dir[] = "/tmp/tmpdir-XXXXXX";
+
+  TMP_DIR = malloc(sizeof(tmp_dir));
+  strcpy(TMP_DIR, tmp_dir);
+
+  TEST_ASSERT_NOT_EQUAL_MESSAGE(NULL, mkdtemp(TMP_DIR), "tmpdir failed");
+}
+
+void tearDown(void) {
+  TEST_ASSERT_EQUAL_MESSAGE(0, chdir(INITIAL_DIR),
+                            "returning to working directory failed");
+  free(INITIAL_DIR);
+  INITIAL_DIR = NULL;
+
+  removeDirectory(TMP_DIR);
+  free(TMP_DIR);
+  TMP_DIR = NULL;
+}
 
 long clone3(struct clone_args *cl_args) {
   return syscall(SYS_clone3, cl_args, sizeof(struct clone_args));
@@ -37,8 +56,6 @@ long clone3(struct clone_args *cl_args) {
 
 void test_unshareNoFsFromFork_chdir_doesNotPropagate(void) {
   // PREPARE
-  char tmpDir[] = "/tmp/tmpdir-XXXXXX";
-  TEST_ASSERT_NOT_EQUAL_MESSAGE(NULL, mkdtemp(tmpDir), "tmpdir failed");
 
   // ACT
   pid_t forkedChildPid;
@@ -53,7 +70,7 @@ void test_unshareNoFsFromFork_chdir_doesNotPropagate(void) {
         exit(1); // unshare failed
       }
 
-      if (chdir(tmpDir) != 0) {
+      if (chdir(TMP_DIR) != 0) {
         exit(2); // chdir failed
       }
 
@@ -72,7 +89,7 @@ void test_unshareNoFsFromFork_chdir_doesNotPropagate(void) {
     }
 
     char *cwd = get_current_dir_name();
-    int directory_moved = strcmp(cwd, tmpDir);
+    int directory_moved = strcmp(cwd, TMP_DIR);
     free(cwd);
 
     if (directory_moved == 0) {
@@ -93,8 +110,6 @@ void test_unshareNoFsFromFork_chdir_doesNotPropagate(void) {
 
 void test_unshareFsFromFork_chdir_doesNotPropagate(void) {
   // PREPARE
-  char tmpDir[] = "/tmp/tmpdir-XXXXXX";
-  TEST_ASSERT_NOT_EQUAL_MESSAGE(NULL, mkdtemp(tmpDir), "tmpdir failed");
 
   // ACT
   pid_t forkedChildPid;
@@ -109,7 +124,7 @@ void test_unshareFsFromFork_chdir_doesNotPropagate(void) {
         exit(1); // unshare failed
       }
 
-      if (chdir(tmpDir) != 0) {
+      if (chdir(TMP_DIR) != 0) {
         exit(2); // chdir failed
       }
 
@@ -128,7 +143,7 @@ void test_unshareFsFromFork_chdir_doesNotPropagate(void) {
     }
 
     char *cwd = get_current_dir_name();
-    int directory_moved = strcmp(cwd, tmpDir);
+    int directory_moved = strcmp(cwd, TMP_DIR);
     free(cwd);
 
     if (directory_moved == 0) {
@@ -149,15 +164,12 @@ void test_unshareFsFromFork_chdir_doesNotPropagate(void) {
 
 void test_unshareNoFsFromClone_chdir_doesPropagate(void) {
   // PREPARE
-  char tmpDir[] = "/tmp/tmpdir-XXXXXX";
-  TEST_ASSERT_NOT_EQUAL(NULL, mkdtemp(tmpDir));
-
   char subDirA[21];
-  TEST_ASSERT_GREATER_THAN(0, sprintf(subDirA, "%s/a", tmpDir));
+  TEST_ASSERT_GREATER_THAN(0, sprintf(subDirA, "%s/a", TMP_DIR));
   TEST_ASSERT_EQUAL(0, mkdir(subDirA, 0700));
 
   char subDirB[21];
-  TEST_ASSERT_GREATER_THAN(0, sprintf(subDirB, "%s/b", tmpDir));
+  TEST_ASSERT_GREATER_THAN(0, sprintf(subDirB, "%s/b", TMP_DIR));
   TEST_ASSERT_EQUAL(0, mkdir(subDirB, 0700));
 
   // ACT
@@ -232,15 +244,12 @@ void test_unshareNoFsFromClone_chdir_doesPropagate(void) {
 
 void test_unshareFsFromClone_chdir_doesNotPropagate(void) {
   // PREPARE
-  char tmpDir[] = "/tmp/tmpdir-XXXXXX";
-  TEST_ASSERT_NOT_EQUAL(NULL, mkdtemp(tmpDir));
-
   char subDirA[21];
-  TEST_ASSERT_GREATER_THAN(0, sprintf(subDirA, "%s/a", tmpDir));
+  TEST_ASSERT_GREATER_THAN(0, sprintf(subDirA, "%s/a", TMP_DIR));
   TEST_ASSERT_EQUAL(0, mkdir(subDirA, 0700));
 
   char subDirB[21];
-  TEST_ASSERT_GREATER_THAN(0, sprintf(subDirB, "%s/b", tmpDir));
+  TEST_ASSERT_GREATER_THAN(0, sprintf(subDirB, "%s/b", TMP_DIR));
   TEST_ASSERT_EQUAL(0, mkdir(subDirB, 0700));
 
   // ACT
