@@ -14,11 +14,16 @@ SRC_NAMESPACES_FS_CLONE=$(UNITY_ROOT)/src/unity.c namespaces/fs/TestClone.c test
 TARGET_NAMESPACES_FS_UNSHARE=target/test_namespaces_fs_unshare
 TARGET_NAMESPACES_FS_CLONE=target/test_namespaces_fs_clone
 
+SRC_NAMESPACES_FILES_CLONE=$(UNITY_ROOT)/src/unity.c namespaces/files/TestClone.c test_runners/namespaces_files_TestClone_Runner.c
+
+TARGET_NAMESPACES_FILES_CLONE=target/test_namespaces_files_clone
+
 all: clean default
 
-default: $(SRC_NAMESPACES_FS_UNSHARE) $(SRC_NAMESPACES_FS_CLONE)
+default: $(SRC_NAMESPACES_FS_UNSHARE) $(SRC_NAMESPACES_FS_CLONE) $(SRC_NAMESPACES_FILES_CLONE)
 	$(C_COMPILER) $(CFLAGS) $(INC_DIRS) $(SYMBOLS) $(SRC_NAMESPACES_FS_UNSHARE) -o $(TARGET_NAMESPACES_FS_UNSHARE)
 	$(C_COMPILER) $(CFLAGS) $(INC_DIRS) $(SYMBOLS) $(SRC_NAMESPACES_FS_CLONE) -o $(TARGET_NAMESPACES_FS_CLONE)
+	$(C_COMPILER) $(CFLAGS) $(INC_DIRS) $(SYMBOLS) $(SRC_NAMESPACES_FILES_CLONE) -o $(TARGET_NAMESPACES_FILES_CLONE)
 
 	@echo
 	@echo Finished preparing tests, running now.
@@ -26,6 +31,7 @@ default: $(SRC_NAMESPACES_FS_UNSHARE) $(SRC_NAMESPACES_FS_CLONE)
 
 	- ./$(TARGET_NAMESPACES_FS_UNSHARE)
 	- ./$(TARGET_NAMESPACES_FS_CLONE)
+	- ./$(TARGET_NAMESPACES_FILES_CLONE)
 
 test_runners/namespaces_fs_TestUnshare_Runner.c: namespaces/fs/TestUnshare.c
 	ruby $(UNITY_ROOT)/auto/generate_test_runner.rb namespaces/fs/TestUnshare.c test_runners/namespaces_fs_TestUnshare_Runner.c
@@ -33,6 +39,9 @@ test_runners/namespaces_fs_TestUnshare_Runner.c: namespaces/fs/TestUnshare.c
 test_runners/namespaces_fs_TestClone_Runner.c: namespaces/fs/TestClone.c
 	ruby $(UNITY_ROOT)/auto/generate_test_runner.rb namespaces/fs/TestClone.c test_runners/namespaces_fs_TestClone_Runner.c
 
+test_runners/namespaces_files_TestClone_Runner.c: namespaces/files/TestClone.c
+	ruby $(UNITY_ROOT)/auto/generate_test_runner.rb namespaces/files/TestClone.c test_runners/namespaces_files_TestClone_Runner.c
+
 clean:
-	$(CLEANUP) $(TARGET_NAMESPACES_FS_UNSHARE) $(TARGET_NAMESPACES_FS_CLONE)
+	$(CLEANUP) $(TARGET_NAMESPACES_FS_UNSHARE) $(TARGET_NAMESPACES_FS_CLONE) $(TARGET_NAMESPACES_FILES_CLONE)
 	mkdir -p test_runners/ target/
