@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 // This program
 #include <netinet/in.h>
@@ -15,16 +16,28 @@
 
 #define BUF_SIZE 1024
 
-int real_main(int, char **);
+int real_main(int, char **, int);
 int request_handler(int);
 
 int main(int argc, char **argv) {
-  int pid_fd;
+  pid_t child;
 
-  struct clone_args cl_args = {
+  int num_pids = 2;
+  int pid_fds[num_pids];
+
+  // Create IPC
+  int pipe_fds[2];
+  if (pipe(pipe_fds) < 0) {
+    perror("pipe");
+    exit(-1);
+  }
+
+  // Spawn real_main
+  // Use CLONE_FILES to have the opened fds passed up
+  struct clone_args real_main_cl_args = {
       .flags = CLONE_NEWIPC | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWUSER |
-               CLONE_NEWUTS | CLONE_PIDFD,
-      .pidfd = (uint64_t)&pid_fd,
+               CLONE_NEWUTS | CLONE_PIDFD | CLONE_FILES,
+      .pidfd = (uint64_t)&pid_fds[0],
       .child_tid = (uint64_t)NULL,
       .parent_tid = (uint64_t)NULL,
       .exit_signal = SIGCHLD,
@@ -33,25 +46,87 @@ int main(int argc, char **argv) {
       .tls = (uint64_t)NULL,
   };
 
-  pid_t child = clone3(&cl_args);
-  if (child < 0) {
+  if ((child = clone3(&real_main_cl_args)) == 0) {
+    int code = real_main(argc, argv, pipe_fds[1]);
+    exit(code);
+  } else if (child < 0) {
     perror("clone3");
     exit(-1);
-  } else if (child == 0) {
-    int code = real_main(argc, argv);
-    exit(code);
-  } else {
-    siginfo_t status;
-    if (waitid(P_PIDFD, pid_fd, &status, WEXITED) == -1) {
+  }
+
+  // Spawn internal cloner (to maintain capabilities)
+  // Use CLONE_FILES to pass the opened fds down
+  struct clone_args process_generator_cl_args = {
+      .flags = CLONE_FILES,
+      .pidfd = (uint64_t)&pid_fds[1],
+      .child_tid = (uint64_t)NULL,
+      .parent_tid = (uint64_t)NULL,
+      .exit_signal = SIGCHLD,
+      .stack = (uint64_t)NULL,
+      .stack_size = 0,
+      .tls = (uint64_t)NULL,
+  };
+
+  if ((child = clone3(&process_generator_cl_args)) == 0) {
+    int read_pipe = pipe_fds[0];
+
+    int client_fd;
+    while (1) {
+      int bytes_read = read(read_pipe, &client_fd, sizeof(client_fd));
+      if (bytes_read == 0) {
+        break;
+      } else if (bytes_read < 0) {
+        perror("read");
+        exit(-1);
+      }
+
+      fprintf(stderr, "got client_fd: %d\n", client_fd);
+
+      // Do not use CLONE_FILES for default CoW behaviour
+      struct clone_args request_cl_args = {
+          .flags = CLONE_NEWIPC | CLONE_NEWNS | CLONE_NEWPID | CLONE_NEWUSER |
+                   CLONE_NEWUTS | CLONE_PIDFD,
+          .pidfd = (uint64_t)&pid_fds[0],
+          .child_tid = (uint64_t)NULL,
+          .parent_tid = (uint64_t)NULL,
+          .exit_signal = SIGCHLD,
+          .stack = (uint64_t)NULL,
+          .stack_size = 0,
+          .tls = (uint64_t)NULL,
+      };
+
+      if ((child = clone3(&request_cl_args)) == 0) {
+        int code = request_handler(client_fd);
+        exit(code);
+      } else if (child < 0) {
+        perror("clone3");
+        exit(-1);
+      }
+    }
+
+    exit(0);
+  } else if (child < 0) {
+    perror("clone3");
+    exit(-1);
+  }
+
+  // Wait for child processes
+  siginfo_t status;
+
+  for (int i = 0; i < num_pids; i++) {
+    if (waitid(P_PIDFD, pid_fds[i], &status, WEXITED) == -1) {
       perror("waitid");
       return -1;
     }
-
-    exit(status.si_status);
+    if (status.si_status != 0) {
+      return status.si_status;
+    }
   }
+
+  return 0;
 }
 
-int real_main(int argc, char **argv) {
+int real_main(int argc, char **argv, int write_pipe) {
   if (argc != 2) {
     fprintf(stderr, "expected 1 argument\n");
     return -1;
@@ -90,7 +165,8 @@ int real_main(int argc, char **argv) {
       perror("accept");
     }
 
-    request_handler(client_fd);
+    write(write_pipe, &client_fd, sizeof(client_fd));
+    fprintf(stderr, "sent client_fd: %d\n", client_fd);
   }
 
   return 0;
@@ -101,7 +177,7 @@ int request_handler(int client_fd) {
   while (1) {
     int read = recv(client_fd, buf, BUF_SIZE, 0);
     if (read < 0) {
-      perror("read");
+      perror("recv");
       return read;
     }
 
